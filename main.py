@@ -1,9 +1,9 @@
 import json
+import os
 
 import gensim
+from gensim import corpora, models
 import nltk
-nltk.download('wordnet')
-
 from nltk import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer, SnowballStemmer
@@ -12,26 +12,25 @@ from nltk.stem.porter import *
 porter = PorterStemmer()
 stop_words = set(stopwords.words('english'))
 
-filepath = './sample_data.json'
-d = {}
+filepath = './input/sample_data.json'
+data = {}
 all_words = []
 
-# moet een map functie worden die een preprocess aanroept
 def readr(filepath):
-    cnt = 1
     for line in open(filepath, mode="r"):
         cmnt = json.loads(line)
         tokens = word_tokenize(cmnt['body'])
         if len(tokens) > 3:
-            stemmed = preprocess(tokens)
-            #print('{} : {}'.format(cnt, stemmed))
-            cnt += 1
-            yield { 'id'        : cmnt['id'],
-                    'stemmed'   : stemmed,
-                    'subreddit' : cmnt['subreddit'] }
+            stemmed = process(tokens)
+            data[cmnt['id']] = {
+                'id': cmnt['id'],
+                'stemmed': stemmed,
+                'subreddit': cmnt['subreddit']
+            }
         pass
 
-def preprocess(tokens):
+
+def process(tokens):
     result = []
     for word in tokens:
         word = word.lower()
@@ -41,18 +40,39 @@ def preprocess(tokens):
     all_words.append(result)
     return result
 
+
+def prepare(data):
+    if not os.path.isfile('./output/result.json'):
+        readr(filepath)
+        with open('./output/result.json', 'w') as outfile:
+            json.dump(data, outfile, indent=4)
+    else:
+        with open('./output/result.json', 'r') as infile:
+            data = json.load(infile)
+
+    if not all_words:
+        for v in data.values():
+            lst = []
+            for s in v['stemmed']:
+                lst.append(s)
+            all_words.append(lst)
+
+
 if __name__ == '__main__':
-    lst = list(readr(filepath))
-    #print(all_words)
+    prepare(data)
+
     dictionary = gensim.corpora.Dictionary(all_words)
-    count = 0
-    for k, v in dictionary.iteritems():
-        print(k, v)
-        count += 1
-        if count > 10:
-            break
 
     dictionary.filter_extremes(no_below=15, no_above=0.5, keep_n=100000)
 
     bow_corpus = [dictionary.doc2bow(doc) for doc in all_words]
-    bow_corpus[28]
+
+    #tfidf = models.TfidfModel(bow_corpus)
+    #corpus_tfidf = tfidf[bow_corpus]
+
+    # Running LDA using Bag of Words
+    lda_model = gensim.models.LdaMulticore(bow_corpus, num_topics=10, id2word=dictionary, passes=2, workers=2)
+
+    for idx, topic in lda_model.print_topics(-1):
+        print('Topic: {} \nWords: {}'.format(idx, topic))
+
