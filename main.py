@@ -1,8 +1,11 @@
 import json
-import sys
+import datetime
+import os.path
+from os import path
 
 import gensim
 from gensim import corpora, models
+from gensim.test.utils import get_tmpfile
 
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer, SnowballStemmer
@@ -12,8 +15,9 @@ stop_words = set(stopwords.words('english'))
 nonse_words = ['http', 'https']
 stemmer = SnowballStemmer("english")
 
-MAX_ITER = 500000
+MAX_ITER = 1000000
 NUM_TOPICS = 20
+SUBREDDITS = []
 
 def filter_comments(filepath, dictionary, words):
     '''(1) Filters fields 'id', 'body' and 'subreddit' of JSON objects and sets as new dictionary entries;
@@ -32,6 +36,8 @@ def filter_comments(filepath, dictionary, words):
         TOKENS = process(BODY)
         # Add all tokens to all_words.
         words.append(TOKENS)
+        # Add SUBREDDIT to SUBREDDITS to count total /r/
+        SUBREDDITS.append(SUBREDDIT)
         # Set newly filtered entries into dictionary, replacing BODY for stemmed counterpart.
         dictionary[ID] = { 'id' : ID, 'body' : TOKENS, 'subreddit': SUBREDDIT }
         count += 1
@@ -54,27 +60,36 @@ def process(text):
 
 
 if __name__ == '__main__':
-    # Path to file containing JSON objects.
-    #infile = './sample_data.json'
-    infile = './RC_2017-12'
-    # Dictionary to save said filtered JSON objects.
-    data = dict()
-    # List containing (multiple of) all tokenized and stemmed words.
-    all_words = list()
+    if not path.exists('./lda.model'):
+        # Path to file containing JSON objects.
+        #infile = './sample_data.json'
+        infile = './RC_2017-12'
+        # Dictionary to save said filtered JSON objects.
+        data = dict()
+        # List containing (multiple of) all tokenized and stemmed words.
+        all_words = list()
 
-    filter_comments(infile, data, all_words)
+        print('Timstamp: {}\t Start'.format(datetime.datetime.now()))
+        filter_comments(infile, data, all_words)
+        print('Timestamp: {}\t Finish'.format(datetime.datetime.now()))
 
-    dictionary = gensim.corpora.Dictionary(all_words)
+        dictionary = corpora.Dictionary(all_words)
 
-    dictionary.filter_extremes(no_below=15, no_above=0.5, keep_n=100000)
+        dictionary.filter_extremes(no_below=15, no_above=0.5, keep_n=100000)
+        dictionary.save_as_text('./dictionary')
 
-    bow_corpus = [dictionary.doc2bow(doc) for doc in all_words]
+        bow_corpus = [dictionary.doc2bow(doc) for doc in all_words]
 
-    #tfidf = models.TfidfModel(bow_corpus)
-    #corpus_tfidf = tfidf[bow_corpus]
+        #tfidf = models.TfidfModel(bow_corpus)
+        #corpus_tfidf = tfidf[bow_corpus]
 
-    # Running LDA using Bag of Words.
-    lda_model = gensim.models.LdaMulticore(bow_corpus, num_topics=NUM_TOPICS, id2word=dictionary, passes=2, workers=2)
+        # Running LDA using Bag of Words.
+        lda_model = models.LdaMulticore(bow_corpus, num_topics=NUM_TOPICS, id2word=dictionary, passes=2, workers=2)
+        # Save model to disk
+        lda_model.save('lda.model')
+    else:
+        lda_model = models.LdaModel.load('./lda.model')
+        dictionary = corpora.Dictionary.load_from_text('./dictionary')
 
     #for idx, topic in lda_model.print_topics(-1):
     #    print('Topic: {} \nWords: {}'.format(idx, topic))
@@ -85,4 +100,6 @@ if __name__ == '__main__':
     bow_vector = dictionary.doc2bow(process(_input))
 
     for index, score in sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1]):
-        print("Score: {}\t Index: {}\tTopic: [{}]".format(score, index, lda_model.print_topic(index, 9)))
+        print("Score: {}\t Index: {}\tTopic: [{}]".format(score, index, lda_model.print_topic(index, 6)))
+
+    #print('Total subreddits: {}'.format(len(set(SUBREDDITS))))
