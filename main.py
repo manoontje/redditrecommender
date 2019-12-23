@@ -1,65 +1,68 @@
 import json
-import os
+import sys
 
 import gensim
 from gensim import corpora, models
-import nltk
-from nltk import word_tokenize
+
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer, SnowballStemmer
-from nltk.stem.porter import *
 
-porter = PorterStemmer()
 stop_words = set(stopwords.words('english'))
+# Nonsense words have the same purpose as stop words; after stemming
+nonse_words = ['http', 'https']
+stemmer = SnowballStemmer("english")
 
-filepath = './input/sample_data.json'
-data = {}
-all_words = []
+MAX_ITER = 500000
+NUM_TOPICS = 20
 
-def readr(filepath):
-    for line in open(filepath, mode="r"):
-        cmnt = json.loads(line)
-        tokens = word_tokenize(cmnt['body'])
-        if len(tokens) > 3:
-            stemmed = process(tokens)
-            data[cmnt['id']] = {
-                'id': cmnt['id'],
-                'stemmed': stemmed,
-                'subreddit': cmnt['subreddit']
-            }
-        pass
+def filter_comments(filepath, dictionary, words):
+    '''(1) Filters fields 'id', 'body' and 'subreddit' of JSON objects and sets as new dictionary entries;
+    (2) new 'body' field is tokenized en lemmatized and
+    (3) adds all newly stemmed tokens to words list.'''
+    count = 0
+    for line in open(filepath, 'r'):
+        if count > MAX_ITER:
+            break
+        JSON_object = json.loads(line)
+        # Extract fields of interest, being 'id', 'body' and 'subreddit'.
+        ID        = JSON_object['id']
+        BODY      = JSON_object['body']
+        SUBREDDIT = JSON_object['subreddit']
+        # Tokenize and lemmatize raw BODY entry.
+        TOKENS = process(BODY)
+        # Add all tokens to all_words.
+        words.append(TOKENS)
+        # Set newly filtered entries into dictionary, replacing BODY for stemmed counterpart.
+        dictionary[ID] = { 'id' : ID, 'body' : TOKENS, 'subreddit': SUBREDDIT }
+        count += 1
 
+def lemmatize_stemming(text):
+    return stemmer.stem(WordNetLemmatizer().lemmatize(text, pos='v'))
 
-def process(tokens):
+def process(text):
+    '''Tokenize and lemmatize.'''
     result = []
-    for word in tokens:
-        word = word.lower()
-        if word.isalpha() and word not in stop_words:
-            stemmed = porter.stem(word)
-            result.append(stemmed)
-    all_words.append(result)
+    for token in gensim.utils.simple_preprocess(text):
+        # If token is not a stop word and longer than three characters. Statement: `len(token) > 3` especially helpful
+        # to filter out alphabetical, but nonsensical entries. (NOT lol, www, com, nl etc.)
+        if token not in stop_words and len(token) > 3:
+            # Stem and add to result
+            stemmed_token = lemmatize_stemming(token)
+            if stemmed_token not in nonse_words:
+                result.append(stemmed_token)
     return result
 
 
-def prepare(data):
-    if not os.path.isfile('./output/result.json'):
-        readr(filepath)
-        with open('./output/result.json', 'w') as outfile:
-            json.dump(data, outfile, indent=4)
-    else:
-        with open('./output/result.json', 'r') as infile:
-            data = json.load(infile)
-
-    if not all_words:
-        for v in data.values():
-            lst = []
-            for s in v['stemmed']:
-                lst.append(s)
-            all_words.append(lst)
-
-
 if __name__ == '__main__':
-    prepare(data)
+    # Path to file containing JSON objects.
+    #infile = './sample_data.json'
+    infile = './RC_2017-12'
+    # Dictionary to save said filtered JSON objects.
+    data = dict()
+    # List containing (multiple of) all tokenized and stemmed words.
+    all_words = list()
+
+    filter_comments(infile, data, all_words)
 
     dictionary = gensim.corpora.Dictionary(all_words)
 
@@ -70,9 +73,16 @@ if __name__ == '__main__':
     #tfidf = models.TfidfModel(bow_corpus)
     #corpus_tfidf = tfidf[bow_corpus]
 
-    # Running LDA using Bag of Words
-    lda_model = gensim.models.LdaMulticore(bow_corpus, num_topics=10, id2word=dictionary, passes=2, workers=2)
+    # Running LDA using Bag of Words.
+    lda_model = gensim.models.LdaMulticore(bow_corpus, num_topics=NUM_TOPICS, id2word=dictionary, passes=2, workers=2)
 
-    for idx, topic in lda_model.print_topics(-1):
-        print('Topic: {} \nWords: {}'.format(idx, topic))
+    #for idx, topic in lda_model.print_topics(-1):
+    #    print('Topic: {} \nWords: {}'.format(idx, topic))
 
+    # Prompt the user to paste a comment he/she liked.
+    _input = input('Prompt: ')
+    # Recommend Topic based on previous user input.
+    bow_vector = dictionary.doc2bow(process(_input))
+
+    for index, score in sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1]):
+        print("Score: {}\t Index: {}\tTopic: [{}]".format(score, index, lda_model.print_topic(index, 9)))
