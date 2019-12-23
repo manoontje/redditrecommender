@@ -1,2 +1,2 @@
 # redditrecommender
-Information Retrieval in 5 dagen.
+Information Retrieval project.
